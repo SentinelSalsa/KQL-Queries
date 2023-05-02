@@ -1,0 +1,83 @@
+SecurityAlert
+| project
+    SystemAlertId
+    ,
+    AlertName
+    ,
+    AlertConfidenceScore = ConfidenceScore
+    ,
+    IsIncident
+    ,
+    AlertTime = TimeGenerated
+    ,
+    parse_json(Entities)  // We need to first parse the JSON blob
+| mvexpand(Entities)        // then we need to mvexpand it so we can use syntax like Entities.XXXXX to reference properties from the blob
+| extend matchIndicatorCriteria = iif(
+                                      Entities.Type =~ "ip",
+                                      Entities.Address           // if the alert resulted from a match with an indicator of type IP, we will match by IP address
+    ,
+                                      iif(
+                                          Entities.Type =~ "filehash",
+                                          Entities.Value                                 // if the alert resulted from a match with an indicator of type file, we will match the file hash value
+    ,
+                                          iif(
+                                              Entities.Type =~ "url",
+                                              Entities.Url                                        // if the alert resulted from a match with an indicator of type URL, we will match the URL value
+    ,
+                                              iif(
+                                                  Entities.Type =~ "host",
+                                                  strcat(Entities.HostName, ".", Entities.DnsDomain) // if the alert resulted from a match with an indicator of type HOST, we will match the FQDN of the host                           
+    ,
+                                                  ""
+                                              )
+                                          )
+                                      )
+                                  )
+| join kind = inner(ThreatIntelligenceIndicator
+    | project
+        IndicatorId
+        ,
+        Active
+        ,
+        IndicatorTime = TimeGenerated
+        ,
+        IndicatorType = Type
+        ,
+        IndicatorThreatType = ThreatType
+        ,
+        IndicatorTag = Tags
+        ,
+        IndicatorThreatSeverity = ThreatSeverity
+        ,
+        IndicatorName = FileName
+        ,
+        IndicatorConfidenceScore = ConfidenceScore
+        ,
+        matchAlertCriteria = strcat(NetworkSourceIP, NetworkIP, NetworkDestinationIP, Url, EmailSourceIpAddress, EmailSenderAddress, DomainName, FileHashValue))
+    on $left.matchIndicatorCriteria == $right.matchAlertCriteria
+| project
+    SystemAlertId         // The Id of the alert
+    ,
+    AlertName                 // The name of the alert
+    ,
+    AlertConfidenceScore      // The alert confidence score (the higher this is the more likely it is the alert indicates a real problem)
+    ,
+    IsIncident                // True indicates this alert is
+    ,
+    AlertTime                 // The time when alert was generated
+    ,
+    IndicatorId               // The Id of the indicator
+    ,
+    IndicatorTime             // The time when the indicator was introduced in the system (i.e. imported or manually created)
+    ,
+    IndicatorType             // The type of indicator participating in this alert
+    ,
+    IndicatorThreatType       // The threat type of the indicator participating in this alert
+    ,
+    IndicatorTag              // Specifys threat actor by tag
+    ,
+    IndicatorThreatSeverity   // The severity score of the indicator participating in this alert
+    ,
+    IndicatorName            // filename output
+    ,
+    IndicatorConfidenceScore  // The confidence score of the indicator participating in this alert
